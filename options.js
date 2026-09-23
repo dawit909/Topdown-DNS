@@ -1,116 +1,177 @@
-const listElement = document.getElementById('mounts-list');
-const keyInput = document.getElementById('mount-key');
-const targetInput = document.getElementById('mount-target');
-const addBtn = document.getElementById('add-btn');
+const mListElement = document.getElementById('mounts-list');
+const mKeyInput = document.getElementById('mount-key');
+const mTargetInput = document.getElementById('mount-target');
+const mAddBtn = document.getElementById('add-mount-btn');
 const errorMsg = document.getElementById('error-msg');
 
-const primaryTLDs = ["com","net","org","jp","de","uk","fr","br","it","ru","es","me","gov","pl","ca","au","cn","co","in","nl","edu","info","eu","ch","id"];
-const shortcuts = {"": "com", "n": "net", "o": "org"};
+const scListElement = document.getElementById('custome-tlds-list');
+const scKeyInput = document.getElementById('shortcut-key');
+const scTargetInput = document.getElementById('shortcut-target');
+const scAddBtn = document.getElementById('add-shortcut-btn');
 
-let editingOldKey = null;
+let activeCustomTLDs = {};
+let editingOldMountKey = null;
+let editingOldShortcutKey = null;
 
-// Validation Rule: Ensure the user typed a Top-Down target
-function isTopDownFormat(target) {
-    let domainPart = target.split('/')[0]; // Isolate domain from paths like /r/soccer
-    let parts = domainPart.split('.');
-    if (parts.length < 2) return false;
-    
-    let firstPart = parts[0].toLowerCase();
-    let lastPart = parts[parts.length - 1].toLowerCase();
-
-    if (shortcuts[firstPart] !== undefined) return true;
-    if (primaryTLDs.includes(firstPart)) return true;
-    
-    // If it ends with a standard primary TLD (like reddit.com), it's backwards!
-    if (primaryTLDs.includes(lastPart)) return false;
-    
-    return true; 
-}
-
-function loadMounts() {
-    browser.storage.local.get({ customMounts: {} }).then(res => {
-        listElement.innerHTML = '';
-        const mounts = res.customMounts;
-        
-        if (Object.keys(mounts).length === 0) {
-            listElement.innerHTML = '<p style="color:#777; font-style:italic;">No custom mounts added yet.</p>';
+function loadData() {
+    browser.storage.local.get({ customMounts: {}, customTLDs: null }).then(res => {
+        if (!res.customTLDs) {
+            activeCustomTLDs = { ...defaultCustomTLDs }; // From shared.js
+            browser.storage.local.set({ customTLDs: activeCustomTLDs });
+        } else {
+            activeCustomTLDs = res.customTLDs;
         }
 
-        for (let key in mounts) {
-            let row = document.createElement('div');
-            row.className = 'mount-row';
-            
-            let info = document.createElement('div');
-            info.className = 'mount-info';
-            info.innerHTML = `<span class="key">${key}</span> &rarr; <span class="target">${mounts[key]}</span>`;
-            
-            let actions = document.createElement('div');
-            actions.className = 'actions';
-
-            let editBtn = document.createElement('button');
-            editBtn.className = 'edit';
-            editBtn.textContent = 'Edit';
-            editBtn.onclick = () => {
-                keyInput.value = key;
-                targetInput.value = mounts[key];
-                editingOldKey = key;
-                addBtn.textContent = 'Save Changes';
-                errorMsg.style.display = 'none';
-                keyInput.focus();
-            };
-
-            let delBtn = document.createElement('button');
-            delBtn.className = 'delete';
-            delBtn.textContent = 'Remove';
-            delBtn.onclick = () => {
-                delete mounts[key];
-                browser.storage.local.set({ customMounts: mounts }).then(loadMounts);
-            };
-            
-            actions.appendChild(editBtn);
-            actions.appendChild(delBtn);
-            row.appendChild(info);
-            row.appendChild(actions);
-            listElement.appendChild(row);
-        }
+        renderCustomTLDs(activeCustomTLDs);
+        renderMounts(res.customMounts);
     });
 }
 
-addBtn.onclick = () => {
-    let key = keyInput.value.trim().toLowerCase();
-    let target = targetInput.value.trim().toLowerCase();
-    errorMsg.style.display = 'none';
-    
-    if (!key || !target) return;
-    
-    // Clean up input
-    target = target.replace(/^https?:\/\//, '');
-    if (target.endsWith('/')) target = target.slice(0, -1);
-
-    // Enforce top-down target rule
-    if (!isTopDownFormat(target)) {
-        errorMsg.style.display = 'block';
-        return;
+function renderCustomTLDs(customTLDs) {
+    scListElement.innerHTML = '';
+    if (Object.keys(customTLDs).length === 0) {
+        scListElement.innerHTML = '<p style="color:#777; font-style:italic;">No custom shortcuts added.</p>';
     }
-    
-    browser.storage.local.get({ customMounts: {} }).then(res => {
-        let mounts = res.customMounts;
-        
-        // If editing a key and the key name changed, purge the old one
-        if (editingOldKey && editingOldKey !== key) {
-            delete mounts[editingOldKey];
+
+    for (let key in customTLDs) {
+        let row = document.createElement('div');
+        row.className = 'row';
+
+        let info = document.createElement('div');
+        info.className = 'info';
+        let displayKey = key === "" ? "<span class='empty-key'>[Empty Key]</span>" : key;
+        info.innerHTML = `<span class="key">${displayKey}</span> &rarr; <span class="target">${customTLDs[key]}</span>`;
+
+        let actions = document.createElement('div');
+        actions.className = 'actions';
+
+        let editBtn = document.createElement('button');
+        editBtn.className = 'edit';
+        editBtn.textContent = 'Edit';
+        editBtn.onclick = () => {
+            scKeyInput.value = key;
+            scTargetInput.value = customTLDs[key];
+            editingOldShortcutKey = key;
+            scAddBtn.textContent = 'Save Changes';
+            scKeyInput.focus();
+        };
+
+        let delBtn = document.createElement('button');
+        delBtn.className = 'delete';
+        delBtn.textContent = 'Remove';
+        delBtn.onclick = () => {
+            delete customTLDs[key];
+            browser.storage.local.set({ customTLDs: customTLDs }).then(loadData);
+        };
+
+        actions.appendChild(editBtn);
+        actions.appendChild(delBtn);
+        row.appendChild(info);
+        row.appendChild(actions);
+        scListElement.appendChild(row);
+    }
+}
+
+function renderMounts(mounts) {
+    mListElement.innerHTML = '';
+    if (Object.keys(mounts).length === 0) {
+        mListElement.innerHTML = '<p style="color:#777; font-style:italic;">No custom mounts added yet.</p>';
+    }
+
+    for (let key in mounts) {
+        let row = document.createElement('div');
+        row.className = 'row';
+
+        let info = document.createElement('div');
+        info.className = 'info';
+        info.innerHTML = `<span class="key">${key}</span> &rarr; <span class="target">${mounts[key]}</span>`;
+
+        let actions = document.createElement('div');
+        actions.className = 'actions';
+
+        let editBtn = document.createElement('button');
+        editBtn.className = 'edit';
+        editBtn.textContent = 'Edit';
+        editBtn.onclick = () => {
+            mKeyInput.value = key;
+            mTargetInput.value = mounts[key];
+            editingOldMountKey = key;
+            mAddBtn.textContent = 'Save Changes';
+            errorMsg.style.display = 'none';
+            mKeyInput.focus();
+        };
+
+        let delBtn = document.createElement('button');
+        delBtn.className = 'delete';
+        delBtn.textContent = 'Remove';
+        delBtn.onclick = () => {
+            delete mounts[key];
+            browser.storage.local.set({ customMounts: mounts }).then(loadData);
+        };
+
+        actions.appendChild(editBtn);
+        actions.appendChild(delBtn);
+        row.appendChild(info);
+        row.appendChild(actions);
+        mListElement.appendChild(row);
+    }
+}
+
+scAddBtn.onclick = () => {
+    let key = scKeyInput.value.trim().toLowerCase();
+    let target = scTargetInput.value.trim().toLowerCase();
+    if (!target) return;
+
+    browser.storage.local.get({ customTLDs: null }).then(res => {
+        let sc = res.customTLDs || { ...defaultCustomTLDs };
+
+        if (editingOldShortcutKey !== null && editingOldShortcutKey !== key) {
+            delete sc[editingOldShortcutKey];
         }
-        
-        mounts[key] = target;
-        
-        browser.storage.local.set({ customMounts: mounts }).then(() => {
-            keyInput.value = '';
-            targetInput.value = '';
-            editingOldKey = null;
-            addBtn.textContent = 'Add Mount';
-            loadMounts();
+
+        sc[key] = target;
+
+        browser.storage.local.set({ customTLDs: sc }).then(() => {
+            scKeyInput.value = '';
+            scTargetInput.value = '';
+            editingOldShortcutKey = null;
+            scAddBtn.textContent = 'Add Shortcut';
+            loadData();
         });
     });
 };
 
-document.addEventListener('DOMContentLoaded', loadMounts);
+mAddBtn.onclick = () => {
+    let key = mKeyInput.value.trim().toLowerCase();
+    let target = mTargetInput.value.trim().toLowerCase();
+    errorMsg.style.display = 'none';
+
+    if (!key || !target) return;
+
+    target = target.replace(/^https?:\/\//, '');
+    if (target.endsWith('/')) target = target.slice(0, -1);
+
+    browser.storage.local.get({ customMounts: {} }).then(res => {
+        let mounts = res.customMounts;
+        if (!isTopDown(target, mounts, activeCustomTLDs)) {
+            errorMsg.style.display = 'block';
+            return;
+        }
+
+        if (editingOldMountKey && editingOldMountKey !== key) {
+            delete mounts[editingOldMountKey];
+        }
+
+        mounts[key] = target;
+
+        browser.storage.local.set({ customMounts: mounts }).then(() => {
+            mKeyInput.value = '';
+            mTargetInput.value = '';
+            editingOldMountKey = null;
+            mAddBtn.textContent = 'Add Mount';
+            loadData();
+        });
+    });
+};
+
+document.addEventListener('DOMContentLoaded', loadData);

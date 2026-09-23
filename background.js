@@ -41,6 +41,42 @@ function reverseDomain(domainStr) {
     return parts.reverse().join('.');
 }
 
+// Helper to decompose target strings or expanded mounts into standard URL components
+function parseTopDownTarget(targetStr) {
+    let hash = "";
+    let search = "";
+
+    let hashIdx = targetStr.indexOf('#');
+    if (hashIdx !== -1) {
+        hash = targetStr.slice(hashIdx);
+        targetStr = targetStr.slice(0, hashIdx);
+    }
+
+    let queryIdx = targetStr.indexOf('?');
+    if (queryIdx !== -1) {
+        search = targetStr.slice(queryIdx);
+        targetStr = targetStr.slice(0, queryIdx);
+    }
+
+    let parts = targetStr.split('/');
+    let domain = parts[0];
+    let path = parts.length > 1 ? "/" + parts.slice(1).join('/') : "";
+
+    return { domain, path, search, hash };
+}
+
+// Safely joins path segments without duplicating slashes
+function joinPaths(basePath, extraPath) {
+    if (!extraPath || extraPath === "/") return basePath || "";
+    if (!basePath) return extraPath;
+    if (basePath.endsWith('/') && extraPath.startsWith('/')) {
+        return basePath + extraPath.slice(1);
+    }
+    if (!basePath.endsWith('/') && !extraPath.startsWith('/')) {
+        return basePath + "/" + extraPath;
+    }
+    return basePath + extraPath;
+}
 browser.webRequest.onBeforeRequest.addListener(
     function (details) {
         if (details.type !== "main_frame") return;
@@ -50,25 +86,27 @@ browser.webRequest.onBeforeRequest.addListener(
         }
 
         let url = new URL(details.url);
-        // 1. Expand the mount (e.g., from "r" to "com.reddit/r")
+
+        // CASE 1: Direct navigation (.r/soccer?sort=top#header)
         let expanded = expandCustomMounts(url.hostname, customMounts);
+        let parsedExpanded = parseTopDownTarget(expanded);
 
-        // 2. Isolate the domain from any path the mount introduced
-        let expandedParts = expanded.split('/');
-        let domainPart = expandedParts[0]; // "com.reddit"
-        let injectedPath = expandedParts.length > 1 ? "/" + expandedParts.slice(1).join('/') : ""; // "/r"
+        if (isTopDown(parsedExpanded.domain, customMounts, customTLDs)) {
+            let standardDomain = reverseDomain(parsedExpanded.domain);
+            let finalPath = joinPaths(parsedExpanded.path, url.pathname);
 
-        // 3. Verify and reverse ONLY the domain part
-        if (isTopDown(domainPart, customMounts, customTLDs)) {
-            let standardDomain = reverseDomain(domainPart); // "reddit.com"
-
-            // 4. Reconstruct the final path
-            let finalPath = injectedPath;
-            if (url.pathname !== "/") {
-                finalPath += url.pathname; // handles .r/soccer -> /r/soccer
+            // Merge mount target query and user query
+            let finalSearch = "";
+            if (parsedExpanded.search && url.search) {
+                finalSearch = parsedExpanded.search + "&" + url.search.slice(1);
+            } else {
+                finalSearch = parsedExpanded.search || url.search;
             }
 
-            let newUrl = "https://" + standardDomain + finalPath + url.search;
+            // User fragment takes precedence over target mount fragment
+            let finalHash = url.hash || parsedExpanded.hash;
+
+            let newUrl = "https://" + standardDomain + finalPath + finalSearch + finalHash;
             return { redirectUrl: newUrl };
         }
 
@@ -77,23 +115,34 @@ browser.webRequest.onBeforeRequest.addListener(
         if (searchParam && url.searchParams.has(searchParam)) {
             let query = url.searchParams.get(searchParam).trim();
 
-            let [rawPath, ...queryAndHash] = query.split(/[\?#]/);
-            let extraStuff = queryAndHash.length ? query.slice(rawPath.length) : "";
+            // Extract user query and fragment from search text
+            let userParsed = parseTopDownTarget(query); // separates host/path from ?query and #hash
 
-            let pathParts = rawPath.split('/');
+            let pathParts = userParsed.domain.split('/');
             let queryDomain = pathParts[0].toLowerCase();
-            let originalPath = pathParts.slice(1).join('/');
+            let userPath = joinPaths(
+                pathParts.length > 1 ? "/" + pathParts.slice(1).join('/') : "",
+                userParsed.path
+            );
 
             let expandedDomain = expandCustomMounts(queryDomain, customMounts);
+            let parsedExpanded = parseTopDownTarget(expandedDomain);
 
-            let fullPath2 = expandedDomain + (originalPath ? "/" + originalPath : "");
-            let parts2 = fullPath2.split('/');
-            let finalDomain2 = parts2[0];
-            let finalPath2 = parts2.slice(1).join('/');
+            if (isTopDown(parsedExpanded.domain, customMounts, customTLDs)) {
+                let standardDomain = reverseDomain(parsedExpanded.domain);
+                let finalPath = joinPaths(parsedExpanded.path, userPath);
 
-            if (isTopDown(finalDomain2, customMounts, customTLDs)) {
-                let standardDomain = reverseDomain(finalDomain2);
-                let newUrl = "https://" + standardDomain + (finalPath2 ? '/' + finalPath2 : '') + extraStuff;
+                // Merge query strings
+                let finalSearch = "";
+                if (parsedExpanded.search && userParsed.search) {
+                    finalSearch = parsedExpanded.search + "&" + userParsed.search.slice(1);
+                } else {
+                    finalSearch = parsedExpanded.search || userParsed.search;
+                }
+
+                let finalHash = userParsed.hash || parsedExpanded.hash;
+
+                let newUrl = "https://" + standardDomain + finalPath + finalSearch + finalHash;
                 return { redirectUrl: newUrl };
             }
         }

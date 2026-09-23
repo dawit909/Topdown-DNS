@@ -20,7 +20,8 @@ const defaultCustomTLDs = {
 function isTopDown(hostLower, customMounts, customTLDsMap) {
     if (!hostLower || hostLower.includes(' ') || hostLower === ".") return false;
 
-    let cleanHost = hostLower.split('/')[0];
+    // Strip out path, query (?), and fragment (#) to isolate the domain part
+    let cleanHost = hostLower.split(/[\/\?#]/)[0];
     let parts = cleanHost.split('.');
 
     let firstPart = parts[0].toLowerCase();

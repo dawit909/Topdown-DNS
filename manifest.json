@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Topdown DNS",
-  "version": "2.1",
+  "version": "2.2",
   "description": "Navigate using top-down domain structures directly from the address bar.",
   "permissions": [
     "webRequest",

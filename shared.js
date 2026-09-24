@@ -12,8 +12,6 @@ const defaultCustomTLDs = {
     "c": "com",
     "n": "net",
     "o": "org",
-    "g": "gov",
-    "e": "edu",
 };
 
 // Unified Validation logic passed a dynamic map to resolve scope issues
@@ -40,29 +38,39 @@ function isTopDown(hostLower, customMounts, customTLDsMap) {
 // PREPROCESSOR: Expands aliases as strict 1-to-1 string replacements
 function expandCustomMounts(hostLower, customMounts) {
     if (hostLower === "") return hostLower
-    let parts = hostLower.split('.');
-    if (parts.length === 0) return hostLower;
 
-    if (parts[0] !== "") return hostLower
+    let splitBySlash = hostLower.split("/")
+    let splitByDot = splitBySlash[0].split(".")
+    if (splitByDot.length === 0) return hostLower;
 
-    let expanded = hostLower
-    let postDot = parts[1].split("/")[0]
-    let afterPostDot = parts.slice(2)
-    let paths = expanded.split("/").slice(1).join("/")
-    if (paths !== "") paths = paths.replace(/^/, "/")
+    let first = splitByDot[0]
+    let second = splitByDot[1]
+    if (first !== "") return hostLower
 
+    let subdomains = splitByDot.slice(2)
+    let subpaths = splitBySlash.slice(1)
+    let subbed = ""
+    let beenawhile = false
+    while (first === "" && customMounts["." + second] && !(customMounts["." + second].includes("/") && subdomains.length > 0)) {
+        beenawhile = true
+        subbed = customMounts["." + second]
+        splitBySlash = subbed.split("/")
+        splitByDot = splitBySlash[0].split(".")
 
-    while (parts[0] === "" && customMounts["." + postDot]) {
-        let substituted = customMounts["." + postDot]
-        expanded = (substituted + afterPostDot.join(".")).split("/")[0]
-        let newPath = "/" + substituted.split("/").slice(1).join("/")
-        paths = paths.replace(/^/, newPath);
-        if (substituted.includes("/") && parts.length > 2) {
-            return `${substituted}.${parts.slice(2).join(".")}${paths}`
-        }
-        parts = expanded.split("/")[0].split(".")
-        postDot = parts[1]
-        afterPostDot = parts.slice(2)
+        subdomains.unshift(...splitBySlash[0].split(".").slice(2))
+        subpaths.unshift(...splitBySlash.slice(1))
+
+        first = splitByDot[0]
+        second = splitByDot[1]
     }
-    return expanded + paths
+
+    if (!beenawhile) {
+        return hostLower
+    }
+    let subdomainsStr = (subdomains.length === 0 ? "" : "." + subdomains.join("."))
+    let pathsStr = (subpaths.length === 0 ? "" : "/" + subpaths.join("/"))
+
+    first = subbed.split("/")[0].split(".")[0]
+    second = subbed.split("/")[0].split(".")[1]
+    return first + second + subdomainsStr + pathsStr
 }

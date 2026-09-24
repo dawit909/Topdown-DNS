@@ -77,13 +77,30 @@ function joinPaths(basePath, extraPath) {
     }
     return basePath + extraPath;
 }
+
+// 1. Capture the storage promise into a variable instead of just executing it
+let storageInitPromise = browser.storage.local.get({ customMounts: {}, customTLDs: null }).then(res => {
+    customMounts = res.customMounts || {};
+    if (res.customTLDs) {
+        customTLDs = res.customTLDs;
+    } else {
+        browser.storage.local.set({ customTLDs: customTLDs });
+    }
+});
+
+
 browser.webRequest.onBeforeRequest.addListener(
-    function (details) {
+    async function (details) {
         if (details.type !== "main_frame") return;
 
         if (details.originUrl && details.originUrl.startsWith("http")) {
             return;
         }
+
+        // 3. Await the promise before doing any parsing.
+        // If it already loaded seconds ago, this resolves instantly.
+        // If Firefox just woke up, it pauses here for a few milliseconds until mounts load.
+        await storageInitPromise;
 
         let url = new URL(details.url);
 
@@ -93,21 +110,27 @@ browser.webRequest.onBeforeRequest.addListener(
 
         if (isTopDown(parsedExpanded.domain, customMounts, customTLDs)) {
             let standardDomain = reverseDomain(parsedExpanded.domain);
-            let finalPath = joinPaths(parsedExpanded.path, url.pathname);
+            let finalPath = joinPaths(parsedExpanded.path, userPath);
 
-            // Merge mount target query and user query
-            let finalSearch = "";
-            if (parsedExpanded.search && url.search) {
-                finalSearch = parsedExpanded.search + "&" + url.search.slice(1);
-            } else {
-                finalSearch = parsedExpanded.search || url.search;
+            // 1. Initialize a clean URL object
+            let finalUrl = new URL("https://" + standardDomain);
+            finalUrl.pathname = finalPath; // Safely encodes path characters, ignores literal slashes
+
+            // 2. Merge query parameters safely (Mount params first, User params override/append)
+            let mountParams = new URLSearchParams(parsedExpanded.search);
+            let userParams = new URLSearchParams(userParsed.search); // or url.search in CASE 1
+
+            userParams.forEach((value, key) => {
+                mountParams.set(key, value);
+            });
+            finalUrl.search = mountParams.toString();
+
+            // 3. Apply fragment (User fragment overrides mount fragment)
+            if (userParsed.hash || parsedExpanded.hash) {
+                finalUrl.hash = userParsed.hash || parsedExpanded.hash;
             }
 
-            // User fragment takes precedence over target mount fragment
-            let finalHash = url.hash || parsedExpanded.hash;
-
-            let newUrl = "https://" + standardDomain + finalPath + finalSearch + finalHash;
-            return { redirectUrl: newUrl };
+            return { redirectUrl: finalUrl.toString() };
         }
 
         // CASE 2: Search engine query intercept
@@ -132,18 +155,25 @@ browser.webRequest.onBeforeRequest.addListener(
                 let standardDomain = reverseDomain(parsedExpanded.domain);
                 let finalPath = joinPaths(parsedExpanded.path, userPath);
 
-                // Merge query strings
-                let finalSearch = "";
-                if (parsedExpanded.search && userParsed.search) {
-                    finalSearch = parsedExpanded.search + "&" + userParsed.search.slice(1);
-                } else {
-                    finalSearch = parsedExpanded.search || userParsed.search;
+                // 1. Initialize a clean URL object
+                let finalUrl = new URL("https://" + standardDomain);
+                finalUrl.pathname = finalPath; // Safely encodes path characters, ignores literal slashes
+
+                // 2. Merge query parameters safely (Mount params first, User params override/append)
+                let mountParams = new URLSearchParams(parsedExpanded.search);
+                let userParams = new URLSearchParams(userParsed.search); // or url.search in CASE 1
+
+                userParams.forEach((value, key) => {
+                    mountParams.set(key, value);
+                });
+                finalUrl.search = mountParams.toString();
+
+                // 3. Apply fragment (User fragment overrides mount fragment)
+                if (userParsed.hash || parsedExpanded.hash) {
+                    finalUrl.hash = userParsed.hash || parsedExpanded.hash;
                 }
 
-                let finalHash = userParsed.hash || parsedExpanded.hash;
-
-                let newUrl = "https://" + standardDomain + finalPath + finalSearch + finalHash;
-                return { redirectUrl: newUrl };
+                return { redirectUrl: finalUrl.toString() };
             }
         }
     },

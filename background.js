@@ -10,7 +10,7 @@ let customTLDs = { ...defaultCustomTLDs };
 let customMounts = {};
 
 // Load user mounts and customTLDs from storage
-browser.storage.local.get({ customMounts: {}, customTLDs: null }).then(res => {
+let storageInitPromise = browser.storage.local.get({ customMounts: {}, customTLDs: null }).then(res => {
     customMounts = res.customMounts || {};
     if (res.customTLDs) {
         customTLDs = res.customTLDs;
@@ -19,7 +19,7 @@ browser.storage.local.get({ customMounts: {}, customTLDs: null }).then(res => {
     }
 });
 
-// Update the memory instantly if the user changes settings in the Options page
+// Update memory instantly if user changes settings in Options page
 browser.storage.onChanged.addListener((changes, area) => {
     if (area === "local") {
         if (changes.customMounts) {
@@ -41,7 +41,6 @@ function reverseDomain(domainStr) {
     return parts.reverse().join('.');
 }
 
-// Helper to decompose target strings or expanded mounts into standard URL components
 function parseTopDownTarget(targetStr) {
     let hash = "";
     let search = "";
@@ -65,7 +64,6 @@ function parseTopDownTarget(targetStr) {
     return { domain, path, search, hash };
 }
 
-// Safely joins path segments without duplicating slashes
 function joinPaths(basePath, extraPath) {
     if (!extraPath || extraPath === "/") return basePath || "";
     if (!basePath) return extraPath;
@@ -78,17 +76,6 @@ function joinPaths(basePath, extraPath) {
     return basePath + extraPath;
 }
 
-// 1. Capture the storage promise into a variable instead of just executing it
-let storageInitPromise = browser.storage.local.get({ customMounts: {}, customTLDs: null }).then(res => {
-    customMounts = res.customMounts || {};
-    if (res.customTLDs) {
-        customTLDs = res.customTLDs;
-    } else {
-        browser.storage.local.set({ customTLDs: customTLDs });
-    }
-});
-
-
 browser.webRequest.onBeforeRequest.addListener(
     async function (details) {
         if (details.type !== "main_frame") return;
@@ -97,37 +84,32 @@ browser.webRequest.onBeforeRequest.addListener(
             return;
         }
 
-        // 3. Await the promise before doing any parsing.
-        // If it already loaded seconds ago, this resolves instantly.
-        // If Firefox just woke up, it pauses here for a few milliseconds until mounts load.
         await storageInitPromise;
 
         let url = new URL(details.url);
 
         // CASE 1: Direct navigation (.r/soccer?sort=top#header)
         let expanded = expandCustomMounts(url.hostname, customMounts);
+
         let parsedExpanded = parseTopDownTarget(expanded);
 
         if (isTopDown(parsedExpanded.domain, customMounts, customTLDs)) {
             let standardDomain = reverseDomain(parsedExpanded.domain);
-            let finalPath = joinPaths(parsedExpanded.path, userPath);
+            let finalPath = joinPaths(parsedExpanded.path, url.pathname);
 
-            // 1. Initialize a clean URL object
             let finalUrl = new URL("https://" + standardDomain);
-            finalUrl.pathname = finalPath; // Safely encodes path characters, ignores literal slashes
+            finalUrl.pathname = finalPath;
 
-            // 2. Merge query parameters safely (Mount params first, User params override/append)
             let mountParams = new URLSearchParams(parsedExpanded.search);
-            let userParams = new URLSearchParams(userParsed.search); // or url.search in CASE 1
+            let userParams = new URLSearchParams(url.search);
 
             userParams.forEach((value, key) => {
                 mountParams.set(key, value);
             });
             finalUrl.search = mountParams.toString();
 
-            // 3. Apply fragment (User fragment overrides mount fragment)
-            if (userParsed.hash || parsedExpanded.hash) {
-                finalUrl.hash = userParsed.hash || parsedExpanded.hash;
+            if (url.hash || parsedExpanded.hash) {
+                finalUrl.hash = url.hash || parsedExpanded.hash;
             }
 
             return { redirectUrl: finalUrl.toString() };
@@ -138,8 +120,7 @@ browser.webRequest.onBeforeRequest.addListener(
         if (searchParam && url.searchParams.has(searchParam)) {
             let query = url.searchParams.get(searchParam).trim();
 
-            // Extract user query and fragment from search text
-            let userParsed = parseTopDownTarget(query); // separates host/path from ?query and #hash
+            let userParsed = parseTopDownTarget(query);
 
             let pathParts = userParsed.domain.split('/');
             let queryDomain = pathParts[0].toLowerCase();
@@ -155,20 +136,17 @@ browser.webRequest.onBeforeRequest.addListener(
                 let standardDomain = reverseDomain(parsedExpanded.domain);
                 let finalPath = joinPaths(parsedExpanded.path, userPath);
 
-                // 1. Initialize a clean URL object
                 let finalUrl = new URL("https://" + standardDomain);
-                finalUrl.pathname = finalPath; // Safely encodes path characters, ignores literal slashes
+                finalUrl.pathname = finalPath;
 
-                // 2. Merge query parameters safely (Mount params first, User params override/append)
                 let mountParams = new URLSearchParams(parsedExpanded.search);
-                let userParams = new URLSearchParams(userParsed.search); // or url.search in CASE 1
+                let userParams = new URLSearchParams(userParsed.search);
 
                 userParams.forEach((value, key) => {
                     mountParams.set(key, value);
                 });
                 finalUrl.search = mountParams.toString();
 
-                // 3. Apply fragment (User fragment overrides mount fragment)
                 if (userParsed.hash || parsedExpanded.hash) {
                     finalUrl.hash = userParsed.hash || parsedExpanded.hash;
                 }

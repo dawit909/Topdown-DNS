@@ -149,7 +149,8 @@ mAddBtn.onclick = () => {
     if (!key || !target) return;
 
     target = target.replace(/^https?:\/\//, '');
-    if (target.endsWith('/')) target = target.slice(0, -1);
+    if (key.endsWith("/")) key = key.substring(0, key.length - 1);
+    if (target.endsWith("/")) target = target.substring(0, target.length - 1);
 
     browser.storage.local.get({ customMounts: {} }).then(res => {
         let mounts = res.customMounts;

@@ -35,7 +35,6 @@ function isTopDown(hostLower, customMounts, customTLDsMap) {
     return false;
 }
 
-// PREPROCESSOR: Expands aliases as strict 1-to-1 string replacements
 function expandCustomMounts(hostLower, customMounts) {
     if (hostLower === "") return hostLower
 
@@ -72,5 +71,5 @@ function expandCustomMounts(hostLower, customMounts) {
 
     first = subbed.split("/")[0].split(".")[0]
     second = subbed.split("/")[0].split(".")[1]
-    return first + second + subdomainsStr + pathsStr
+    return first + "." + second + subdomainsStr + pathsStr
 }
